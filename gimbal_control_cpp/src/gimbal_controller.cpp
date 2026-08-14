@@ -19,8 +19,20 @@ public:
     GimbalController() : Node("gimbalcontroller"),serial_fd_(-1){   //This
         offset_yaw_ = 0.0;
         offset_pitch_ = 0.0;
-        std::string port = "/dev/ttyACM0";  //This
-        int baudrate = 115200;
+        yaw_level_deg_ = this->declare_parameter<double>("yaw_level_deg", -90.0);
+        pitch_level_deg_ = this->declare_parameter<double>("pitch_level_deg", -15.0);
+        move_to_level_on_start_ = this->declare_parameter<bool>(
+    "move_to_level_on_start", false
+);
+has_command_ = move_to_level_on_start_;
+
+if (move_to_level_on_start_) {
+    RCLCPP_INFO(this->get_logger(), "Moving to calibrated level on startup.");
+}
+    const std::string port = this->declare_parameter<std::string>(
+        "port_name",
+        "/dev/serial/by-id/usb-1a86_USB_Single_Serial_5B21242534-if00");
+    const int baudrate = this->declare_parameter<int>("baud_rate", 115200);
         RCLCPP_INFO(this->get_logger(),"Opening serial port: %s...",port.c_str());
         serial_fd_ = open_serial(port,baudrate);
         if(serial_fd_ < 0){
@@ -28,7 +40,7 @@ public:
         }
         init_gimbal();
         manual_sub_ = this->create_subscription<geometry_msgs::msg::Vector3>(
-            "/gimbal/cmd_offset", //This
+            "cmd_offset", //This
             10,
             std::bind(&GimbalController::manual_offset_callback,this,std::placeholders::_1)//This
         );
@@ -50,8 +62,12 @@ private:
     int serial_fd_;
     double offset_yaw_; //This
     double offset_pitch_;
+    double yaw_level_deg_;
+    double pitch_level_deg_;
+    bool move_to_level_on_start_;
     rclcpp::Subscription<geometry_msgs::msg::Vector3>::SharedPtr manual_sub_;   //This
     rclcpp::TimerBase::SharedPtr timer_;
+    bool has_command_{false};
     int open_serial(const std::string& port_name,int baudrate){
         int fd = open(port_name.c_str(),O_RDWR|O_NOCTTY);//This
         if(fd == -1)return -1;
@@ -126,11 +142,15 @@ private:
     void manual_offset_callback(const geometry_msgs::msg::Vector3::SharedPtr msg){
         offset_yaw_ = msg->x;
         offset_pitch_ = msg->y;
+        has_command_ = true;
         RCLCPP_INFO(this->get_logger(),"Recived offset: Yaw = %.1f Pitch = %.1f",offset_yaw_,offset_pitch_);
     }
     void control_loop(){
-        send_angle_target(1, 0.0+offset_yaw_);
-        send_angle_target(2, 0.0+offset_pitch_);
+        if (!has_command_) {
+            return;
+            }
+        send_angle_target(1, yaw_level_deg_ + offset_yaw_);
+        send_angle_target(2, pitch_level_deg_ + offset_pitch_);
     }
 };
 
